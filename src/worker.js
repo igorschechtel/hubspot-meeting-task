@@ -151,8 +151,7 @@ const processCompanies = async (domain, hubId, q) => {
 
       q.push({
         actionName: isCreated ? 'Company Created' : 'Company Updated',
-        actionDate:
-          new Date(isCreated ? company.createdAt : company.updatedAt) - 2000,
+        actionDate: new Date(isCreated ? company.createdAt : company.updatedAt),
         ...actionTemplate,
       });
     });
