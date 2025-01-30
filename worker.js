@@ -17,8 +17,8 @@ const generateLastModifiedDateFilter = (
   const lastModifiedDateFilter = date
     ? {
         filters: [
-          { propertyName, operator: 'GTQ', value: `${date.valueOf()}` },
-          { propertyName, operator: 'LTQ', value: `${nowDate.valueOf()}` },
+          { propertyName, operator: 'GTE', value: `${date.valueOf()}` },
+          { propertyName, operator: 'LTE', value: `${nowDate.valueOf()}` },
         ],
       }
     : {};
