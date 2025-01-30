@@ -3,7 +3,7 @@ const { queue } = require('async');
 const _ = require('lodash');
 
 const { filterNullValuesFromObject, goal } = require('./utils');
-const Domain = require('./Domain');
+const Domain = require('./models/Domain');
 
 const hubspotClient = new hubspot.Client({ accessToken: '' });
 const propertyPrefix = 'hubspot__';
@@ -319,6 +319,131 @@ const processContacts = async (domain, hubId, q) => {
   }
 
   account.lastPulledDates.contacts = now;
+  await saveDomain(domain);
+
+  return true;
+};
+
+/**
+ * Get recently modified meetings as 100 meetings per page
+ */
+const processMeetings = async (domain, hubId, q) => {
+  const account = domain.integrations.hubspot.accounts.find(
+    (account) => account.hubId === hubId
+  );
+  const lastPulledDate = new Date(account.lastPulledDates.meetings);
+  const now = new Date();
+
+  let hasMore = true;
+  const offsetObject = {};
+  const limit = 100;
+
+  while (hasMore) {
+    const lastModifiedDate = offsetObject.lastModifiedDate || lastPulledDate;
+    const lastModifiedDateFilter = generateLastModifiedDateFilter(
+      lastModifiedDate,
+      now,
+      'lastmodifieddate'
+    );
+    const searchObject = {
+      filterGroups: [lastModifiedDateFilter],
+      sorts: [{ propertyName: 'lastmodifieddate', direction: 'ASCENDING' }],
+      properties: [
+        'hs_timestamp',
+        'hs_meeting_title',
+        'hubspot_owner_id',
+        'hs_meeting_body',
+        'hs_internal_meeting_notes',
+        'hs_meeting_external_url',
+        'hs_meeting_location',
+        'hs_meeting_start_time',
+        'hs_meeting_end_time',
+        'hs_meeting_outcome',
+        'hs_activity_type',
+        'hs_attachment_ids',
+      ],
+      limit,
+      after: offsetObject.after,
+    };
+
+    let searchResult = {};
+
+    let tryCount = 0;
+    while (tryCount <= 4) {
+      try {
+        searchResult = await hubspotClient.crm.meetings.searchApi.doSearch(
+          searchObject
+        );
+        break;
+      } catch (err) {
+        tryCount++;
+
+        if (new Date() > expirationDate)
+          await refreshAccessToken(domain, hubId);
+
+        await new Promise((resolve, reject) =>
+          setTimeout(resolve, 5000 * Math.pow(2, tryCount))
+        );
+      }
+    }
+
+    if (!searchResult)
+      throw new Error('Failed to fetch meetings for the 4th time. Aborting.');
+
+    const data = searchResult.results || [];
+
+    console.log('fetch meeting batch');
+
+    offsetObject.after = parseInt(searchResult.paging?.next?.after);
+    const meetingIds = data.map((meeting) => meeting.id);
+
+    // meeting to attendee association
+
+    data.forEach((meeting) => {
+      if (!meeting.properties || !meeting.properties.email) return;
+
+      const companyId = companyAssociations[meeting.id];
+
+      const isCreated = new Date(meeting.createdAt) > lastPulledDate;
+
+      const userProperties = {
+        company_id: companyId,
+        meeting_name: (
+          (meeting.properties.firstname || '') +
+          ' ' +
+          (meeting.properties.lastname || '')
+        ).trim(),
+        meeting_title: meeting.properties.jobtitle,
+        meeting_source: meeting.properties.hs_analytics_source,
+        meeting_status: meeting.properties.hs_lead_status,
+        meeting_score: parseInt(meeting.properties.hubspotscore) || 0,
+      };
+
+      const actionTemplate = {
+        includeInAnalytics: 0,
+        identity: meeting.properties.email,
+        userProperties: filterNullValuesFromObject(userProperties),
+      };
+
+      q.push({
+        actionName: isCreated ? 'Contact Created' : 'Contact Updated',
+        actionDate: new Date(isCreated ? meeting.createdAt : meeting.updatedAt),
+        ...actionTemplate,
+      });
+    });
+
+    if (!offsetObject?.after) {
+      hasMore = false;
+      break;
+    } else if (offsetObject?.after >= 9900) {
+      offsetObject.after = 0;
+      offsetObject.lastModifiedDate = new Date(
+        data[data.length - 1].updatedAt
+      ).valueOf();
+    }
+  }
+
+  account.lastPulledDates.meetings = now;
   await saveDomain(domain);
 
   return true;

@@ -19,13 +19,13 @@ mongoose
   })
   .then(() => {
     console.log('connected to database');
-    require('./Domain');
+    require('./src/models/Domain');
 
     // worker setup
-    require('./worker')();
+    require('./src/worker')();
   });
 
 process.env.instance = 'app';
 
 // server setup
-require('./server');
+require('./src/server');
