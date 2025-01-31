@@ -1,3 +1,5 @@
+const Action = require('./models/Action');
+
 const disallowedValues = [
   '[not provided]',
   'placeholder',
@@ -29,9 +31,18 @@ const normalizePropertyName = (key) =>
     .replace(/^_+|_+$/g, '')
     .replace(/_+/g, '_');
 
-const goal = (actions) => {
-  // this is where the data will be written to the database
-  console.log(actions);
+const goal = async (actions) => {
+  await Promise.all(
+    actions.map(async (action) => {
+      try {
+        const newAction = new Action(action);
+        await newAction.save();
+      } catch (error) {
+        console.log('Error saving action:', error.message);
+        console.log('Action:', action);
+      }
+    })
+  );
 };
 
 module.exports = {
